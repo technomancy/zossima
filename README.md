@@ -8,8 +8,10 @@ its dependencies Ruby keeps track of where each method is defined, so
 you can use <kbd>M-.</kbd> to jump to the definition of a given method
 and <kbd>M-,</kbd> to jump back.
 
-It prompts you with a list of all known classes and modules, and once you've
-chosen one, narrows down to a list of methods.
+It looks for the method or module at point in the loaded environment.
+If it's a method and the receiver is known lexically, it first tries to narrow
+it down to sub/superclasses or included modules as appropriate.
+If the result is ambiguous, it then asks you to pick the module/location.
 
 ## Install
 
@@ -24,12 +26,17 @@ package-install-file</kbd>. Once it's installed:
 
 * Package on Marmalade
 * Support for multiple inf-rubies in one Emacs instance
-* Using the class/method at point if applicable?
 * Possibly use the same class/method selector for docs?
+* Eval call target name in a safer way?
+* Do not jump to private methods when the call has explicit receiver
+* Handle `delegate` and `send`, `Class.new.method` and `self.class.method`
+* For methods defined through macros, optionally jump to where the macro was
+  called, instead of its definition?
 
 ## Copying
 
 Copyright © 2012 Phil Hagelberg
+
 Copyright © 2012 Dmitry Gutov
 
 This program is free software; you can redistribute it and/or modify

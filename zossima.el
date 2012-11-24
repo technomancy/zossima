@@ -5,9 +5,9 @@
 
 ;; Author: Phil Hagelberg
 ;; URL: https://github.com/technomancy/zossima
-;; Version: 0.1
+;; Version: 0.2
 ;; Created: 2012-10-24
-;; Keywords: ruby convenience
+;; Keywords: ruby convenience rails
 ;; EmacsWiki: Zossima
 ;; Package-Requires: ((inf-ruby "2.2.3"))
 
@@ -30,6 +30,7 @@
 ;;
 ;;  - M-. to jump to a definition
 ;;  - M-, to jump back
+;;  - C-c C-k to refresh Rails environment
 ;;
 ;; Before using `zossima-jump', call `run-ruby' or `rinari-console'.
 
@@ -80,7 +81,11 @@
 
 (defun zossima-request (endpoint &rest args)
   (let* ((url (format "http://127.0.0.1:%s/%s/%s" zossima-port endpoint
-                      (mapconcat 'url-hexify-string args "/")))
+                      (mapconcat (lambda (arg)
+                                   (cond ((eq arg t) "yes")
+                                         (arg (url-hexify-string arg))
+                                         (t "_")))
+                                 args "/")))
          (response-buffer (zossima-retrieve url))
          (value (with-current-buffer response-buffer
                   (goto-char (point-min))
@@ -95,36 +100,135 @@
     (unless (memq url-http-response-status '(200 500))
       (when (or (not retries) (plusp retries))
         (kill-buffer)
-        (sit-for 0.3)
+        (sleep-for 0.3)
         (set-buffer
          (zossima-retrieve url (1- (or retries zossima-max-retries))))))
     (current-buffer)))
 
-(defun zossima-jump ()
-  "Jump to method definition."
+(defun zossima-ask ()
+  "Prompt for module, method, and jump to its definition."
   (interactive)
-  (zossima-start)
   (let* ((modules (zossima-request "modules"))
-         (module (ido-completing-read "Modules: " modules))
+         (module (ido-completing-read "Module: " modules))
          (targets (zossima-request "targets" module))
          (_ (unless targets (error "No jumpable methods found")))
          (target (ido-completing-read "Method: " targets))
          (_ (string-match zossima-regex target))
          (module (match-string 1 target))
          (type (if (string= "#" (match-string 2 target)) "instance" "module"))
-         (method (match-string 3 target))
-         (location (zossima-request "location" module type method)))
-    (ring-insert find-tag-marker-ring (point-marker))
-    (find-file (nth 0 location))
-    (goto-char (point-min))
-    (forward-line (1- (nth 1 location)))
-    (back-to-indentation)))
+         (method (match-string 3 target)))
+    (zossima-jump-to module type method)))
+
+(defun zossima-jump (arg)
+  "Jump to the method or module at point, prompt for module or file if necessary.
+If invoked with a prefix or no symbol at point, delegate to `zossima-ask'."
+  (interactive "P")
+  (zossima-start)
+  (let ((thing (thing-at-point 'symbol)) instance super module)
+    (cond
+     ((or (not thing) arg)
+      (zossima-ask))
+     ((let (case-fold-search) (string-match "\\`[A-Z]" thing))
+      (zossima-jump-to-module thing))
+     (t
+      (let* ((target (save-excursion
+                       (and (progn (beginning-of-thing 'symbol)
+                                   (= ?. (char-before)))
+                            (progn (forward-char -2)
+                                   (thing-at-point 'symbol)))))
+             (_ (when (save-excursion (end-of-thing 'symbol) (looking-at "!"))
+                  (setq thing (concat thing "!"))))
+             (ctx (zossima-context))
+             (module (first ctx))
+             (_ (unless target
+                  (setq instance (second ctx))
+                  (when (string= thing "super")
+                    (setq thing (third ctx)
+                          super t))))
+             (_ (when (and target (string= thing "new"))
+                  (setq thing "initialize"
+                        instance t)))
+             (modules (zossima-request "method_targets"
+                                       thing target module instance super))
+             (_ (unless modules (error "Method not found")))
+             (target (if (= 1 (length modules))
+                         (car modules)
+                       (assoc (ido-completing-read "Module: " modules nil t)
+                              modules))))
+        (zossima-jump-to (first target) (second target) thing))))))
+
+(defun zossima-jump-to-module (name)
+  "Prompt for module, jump to a file where it has method definitions."
+  (interactive `(,(ido-completing-read "Module: " (zossima-request "modules"))))
+  (let ((paths (zossima-request "class_locations" name (car (zossima-context)))))
+    (when (null paths) (error "Can't find the location"))
+    (let ((file (if (= (length paths) 1)
+                    (car paths)
+                  (let ((alist (zossima-to-abbr-paths paths)))
+                    (cdr (assoc (ido-completing-read "File: " alist nil t)
+                                alist))))))
+      (ring-insert find-tag-marker-ring (point-marker))
+      (find-file file)
+      (goto-char (point-min))
+      (let* ((nesting (split-string name "::"))
+             (cnt (1- (length nesting))))
+        (re-search-forward (concat "^[ \t]*\\(class\\|module\\) +.*\\_<"
+                                   (loop for i from 1 to cnt
+                                         concat "\\(")
+                                   (mapconcat #'identity nesting "::\\)?")
+                                   "\\_>")))
+      (back-to-indentation))))
+
+(defun zossima-to-abbr-paths (list)
+  (let* ((sorted (sort (copy-sequence list) #'string-lessp))
+         (first (first sorted))
+         (last (car (last sorted)))
+         (len (loop for i from 0 to (min (length first)
+                                         (length last))
+                    when (/= (aref first i) (aref last i))
+                    return i)))
+    (while (/= (aref first (1- len)) ?/) (decf len))
+    (mapcar (lambda (path) (cons (substring path len) path)) list)))
+
+(defun zossima-context ()
+  (let ((current-method (ruby-add-log-current-method)))
+    (if current-method
+        ;; Side-stepping the module methods bug in the above function.
+        (let* ((segments (split-string current-method "#\\|\\.\\|::" t))
+               (method-name (when (string-match "\\.\\|#" current-method)
+                              (car (last segments))))
+               (instance (string-match "#" current-method))
+               (module (mapconcat 'identity (if method-name
+                                                (butlast segments)
+                                              segments) "::")))
+          (set-text-properties 0 (length module) nil module) ;; for debugging
+          (set-text-properties 0 (length method-name) nil method-name)
+          (list module (when instance t) method-name))
+      (list nil t nil))))
+
+(defun zossima-jump-to (module type method)
+  (let ((location (zossima-request "location" module type method)))
+    (if (null location)
+        (message "Can't jump to a C method")
+      (ring-insert find-tag-marker-ring (point-marker))
+      (find-file (nth 0 location))
+      (goto-char (point-min))
+      (forward-line (1- (nth 1 location)))
+      (back-to-indentation))))
+
+(defun zossima-rails-refresh ()
+  "Pick up changes in the loaded classes and detect new files.
+Only works with Rails, see e.g. `rinari-console'."
+  (interactive)
+  (zossima-start)
+  (zossima-request "rails_refresh")
+  (message "Done"))
 
 (defvar zossima-mode-map
   (let ((map (make-sparse-keymap)))
-    (set-keymap-parent map ruby-mode-map)
     (define-key map (kbd "M-.") 'zossima-jump)
     (define-key map (kbd "M-,") 'pop-tag-mark)
+    (define-key map (kbd "C-c C-k") 'zossima-rails-refresh)
     map))
 
 ;;;###autoload
