@@ -8,7 +8,7 @@ its dependencies Ruby keeps track of where each method is defined, so
 you can use <kbd>M-.</kbd> to jump to the definition of a given method
 and <kbd>M-,</kbd> to jump back.
 
-It prompts you with a list of all known classes, and once you've
+It prompts you with a list of all known classes and modules, and once you've
 chosen one, narrows down to a list of methods.
 
 ## Install
@@ -17,12 +17,11 @@ Currently you should just check it out and run <kbd>M-x
 package-install-file</kbd>. Once it's installed:
 
 ```lisp
-(add-hook 'inf-ruby-mode-hook 'zossima-mode)
+(add-hook 'ruby-mode-hook 'zossima-mode)
 ```
 
 ## Todo
 
-* Support for modules
 * Package on Marmalade
 * Support for multiple inf-rubies in one Emacs instance
 * Using the class/method at point if applicable?
@@ -31,6 +30,7 @@ package-install-file</kbd>. Once it's installed:
 ## Copying
 
 Copyright © 2012 Phil Hagelberg
+Copyright © 2012 Dmitry Gutov
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by

@@ -1,6 +1,7 @@
 ;;; zossima.el --- Ruby from Emacs
 
 ;; Copyright © 2012 Phil Hagelberg
+;; Copyright © 2012 Dmitry Gutov
 
 ;; Author: Phil Hagelberg
 ;; URL: https://github.com/technomancy/zossima
@@ -25,10 +26,12 @@
 
 ;;; Usage
 
-;; (add-hook 'inf-ruby-mode-hook 'zossima-mode)
+;; (add-hook 'ruby-mode-hook 'zossima-mode)
 ;;
 ;;  - M-. to jump to a definition
 ;;  - M-, to jump back
+;;
+;; Before using `zossima-jump', call `run-ruby' or `rinari-console'.
 
 ;;; License:
 
@@ -63,7 +66,9 @@
 
 (defvar zossima-port 24959)
 
-(defvar zossima-regex "^\\([A-Z][A-Za-z:]+\\)\\([#\\.]\\)\\([a-z_]+\\)$")
+(defvar zossima-regex "^\\([A-Z][A-Za-z0-9:]+\\)\\([#\\.]\\)\\([a-z0-9_]+[?!=]?\\)$")
+
+(defvar zossima-max-retries 4)
 
 (defun zossima-start ()
   "Ensure remote process has Zossima started."
@@ -74,9 +79,9 @@
                       (format "Zossima.start(%s)\n" zossima-port)))
 
 (defun zossima-request (endpoint &rest args)
-  (let* ((url (format "http://localhost:%s/%s/%s" zossima-port endpoint
-                      (mapconcat 'identity args "/")))
-         (response-buffer (url-retrieve-synchronously url))
+  (let* ((url (format "http://127.0.0.1:%s/%s/%s" zossima-port endpoint
+                      (mapconcat 'url-hexify-string args "/")))
+         (response-buffer (zossima-retrieve url))
          (value (with-current-buffer response-buffer
                   (goto-char (point-min))
                   (search-forward "\n\n")
@@ -85,19 +90,30 @@
     (kill-buffer response-buffer)
     value))
 
+(defun zossima-retrieve (url &optional retries)
+  (with-current-buffer (url-retrieve-synchronously url)
+    (unless (memq url-http-response-status '(200 500))
+      (when (or (not retries) (plusp retries))
+        (kill-buffer)
+        (sit-for 0.3)
+        (set-buffer
+         (zossima-retrieve url (1- (or retries zossima-max-retries))))))
+    (current-buffer)))
+
 (defun zossima-jump ()
   "Jump to method definition."
   (interactive)
   (zossima-start)
-  (let* ((classes (zossima-request "classes"))
-         (class (ido-completing-read "Class: " classes))
-         (targets (zossima-request "targets" class))
+  (let* ((modules (zossima-request "modules"))
+         (module (ido-completing-read "Modules: " modules))
+         (targets (zossima-request "targets" module))
+         (_ (unless targets (error "No jumpable methods found")))
          (target (ido-completing-read "Method: " targets))
          (_ (string-match zossima-regex target))
-         (class (match-string 1 target))
-         (type (if (string= "#" (match-string 2 target)) "instance" "class"))
+         (module (match-string 1 target))
+         (type (if (string= "#" (match-string 2 target)) "instance" "module"))
          (method (match-string 3 target))
-         (location (zossima-request "location" class type method)))
+         (location (zossima-request "location" module type method)))
     (ring-insert find-tag-marker-ring (point-marker))
     (find-file (nth 0 location))
     (goto-char (point-min))

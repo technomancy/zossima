@@ -22,18 +22,21 @@ module Zossima
     end
   end
 
-  def self.classes
-    ObjectSpace.each_object(Class).map{|c| c.to_s }
+  def self.modules
+    ObjectSpace.each_object(Module).map{|c| c.name }.compact!
   end
 
   def self.targets(obj)
     obj = eval(obj)
-    if obj.is_a? Class
-      # TODO: this filters out interesting things like #initialize
-      class_methods = (obj.methods - Class.methods).map{|m| "#{obj}.#{m}"}
-      instance_methods = (obj.instance_methods - Object.instance_methods).map{|m| "#{obj}\##{m}"}
-      class_methods + instance_methods
-    # elsif obj.is_a? Module
+    if obj.is_a? Module
+      module_methods = obj.methods.select{|m| obj.method(m).source_location}
+        .map{|m| "#{obj}.#{m}"}
+      instance_methods = (obj.instance_methods +
+                          obj.private_instance_methods(false))
+        .select{|m| obj.instance_method(m).source_location}
+        .map{|m| "#{obj}\##{m}"}
+      # XXX: Filter out not overridden methods? obj.instance_method(m).owner
+      module_methods + instance_methods
     else
       self.targets(obj.class.to_s)
     end
