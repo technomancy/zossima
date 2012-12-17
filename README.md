@@ -13,11 +13,12 @@ chosen one, narrows down to a list of methods.
 
 ## Install
 
-Currently you should just check it out and run <kbd>M-x
-package-install-file</kbd>. Once it's installed:
+Currently you should just check it out and add this to your emacs config:
 
 ```lisp
-(add-hook 'ruby-mode-hook 'zossima-mode)
+(add-to-list 'load-path "/path/to/zossima-checkout")
+(autoload 'zossima-mode "zossima" "" t)
+(add-hook 'inf-ruby-mode-hook 'zossima-mode)
 ```
 
 ## Todo
