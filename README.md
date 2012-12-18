@@ -18,7 +18,7 @@ Currently you should just check it out and add this to your emacs config:
 ```lisp
 (add-to-list 'load-path "/path/to/zossima-checkout")
 (autoload 'zossima-mode "zossima" "" t)
-(add-hook 'inf-ruby-mode-hook 'zossima-mode)
+(add-hook 'ruby-mode-hook 'zossima-mode)
 ```
 
 ## Todo
